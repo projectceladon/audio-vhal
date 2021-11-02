@@ -54,7 +54,9 @@ enum
 {
     CMD_OPEN = 0,
     CMD_CLOSE = 1,
-    CMD_DATA = 2
+    CMD_DATA = 2,
+    CMD_STREAM_START = 3,
+    CMD_STREAM_STOP = 4
 };
 
 enum
@@ -116,6 +118,7 @@ struct audio_server_socket
     //Audio out socket
     struct stub_stream_out *sso;
     int out_fd;
+    bool out_stream_standby;
     pthread_t oss_thread; // out socket server thread
     int oss_exit;         // out socket server thread exit
     int oss_fd;           // out socket server fd
@@ -349,8 +352,34 @@ static int out_set_format(struct audio_stream *stream, audio_format_t format)
 static int out_standby(struct audio_stream *stream)
 {
     ALOGV("out_standby");
+    int ret;
+    if (ass.out_fd > 0)
+    {
+        struct audio_socket_info asi;
+        memset(&asi, 0, sizeof(struct audio_socket_info));
+        asi.cmd = CMD_STREAM_STOP;
+        do
+        {
+            ret = write(ass.out_fd, &asi, sizeof(struct audio_socket_info));
+        } while (ret < 0 && errno == EINTR);
+        if (ret != sizeof(struct audio_socket_info))
+        {
+            ALOGE("%s: could not notify the client(%d) to stop streaming: ret=%d: %s.",
+                  __FUNCTION__, ass.out_fd, ret, strerror(errno));
+            return -1;
+        }
+        ass.out_stream_standby = true;
+    }
+    else
+    {
+
+        ALOGE("%s: Audio out client is not connected. "
+              "port(%d) ass.out_fd(%d).",
+              __FUNCTION__, ass.out_tcp_port, ass.out_fd);
+        return -1;
+    }
+    return ret;
     // out->last_write_time_us = 0; unnecessary as a stale write time has same effect
-    return 0;
 }
 
 static int out_dump(const struct audio_stream *stream, int fd)
@@ -399,6 +428,22 @@ static ssize_t out_write_to_client(struct audio_stream_out *stream, const void *
     int ne;
     if (ass.out_fd > 0)
     {
+        if (ass.out_stream_standby == true)
+        {
+            struct audio_socket_info asi;
+            int ret;
+            asi.cmd = CMD_STREAM_START;
+            do
+            {
+                ret = write(ass.out_fd, &asi, sizeof(struct audio_socket_info));
+            } while (ret < 0 && errno == EINTR);
+            if (ret != sizeof(struct audio_socket_info))
+            {
+                ALOGE("%s: could not notify the client(%d) to start streaming: ret=%d: %s.",
+                      __FUNCTION__, ass.out_fd, ret, strerror(errno));
+            }
+            ass.out_stream_standby = false;
+        }
         nevents = epoll_wait(ass.oss_epoll_fd, ass.oss_epoll_event, 1, timeout);
         if (nevents < 0)
         {
@@ -712,6 +757,7 @@ static void *out_socket_sever_thread(void *args)
                   "new_client_fd = %d",
                   __func__, new_client_fd);
             pass->out_fd = new_client_fd;
+            pass->out_stream_standby = true; 
             if (pass->out_fd > 0)
             {
                 pthread_mutex_lock(&ass.mutexlock_out);
@@ -1364,7 +1410,6 @@ static int adev_open_input_stream(struct audio_hw_device *dev,
     struct stub_stream_in *in = (struct stub_stream_in *)calloc(1, sizeof(struct stub_stream_in));
     if (!in)
         return -ENOMEM;
-
     in->stream.common.get_sample_rate = in_get_sample_rate;
     in->stream.common.set_sample_rate = in_set_sample_rate;
     in->stream.common.get_buffer_size = in_get_buffer_size;
