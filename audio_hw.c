@@ -85,6 +85,7 @@ struct audio_socket_info
 struct stub_audio_device
 {
     struct audio_hw_device device;
+    bool mic_mute;
 };
 
 struct stub_stream_out
@@ -105,6 +106,7 @@ struct stub_stream_in
     audio_channel_mask_t channel_mask;
     audio_format_t format;
     size_t frame_count;
+    struct stub_audio_device *dev;
 };
 
 struct audio_server_socket
@@ -948,6 +950,7 @@ static ssize_t in_read(struct audio_stream_in *stream, void *buffer,
     }
 
     struct stub_stream_in *in = (struct stub_stream_in *)stream;
+    struct stub_audio_device *adev = in->dev;
     ssize_t ret = bytes;
     ssize_t result = -1;
 
@@ -1013,6 +1016,8 @@ static ssize_t in_read(struct audio_stream_in *stream, void *buffer,
     // On the subsequent in_read(), we measure the elapsed time spent in
     // the recording thread. This is subtracted from the sleep estimate based on frames,
     // thereby accounting for fill in the alsa buffer during the interim.
+    if (adev->mic_mute)
+        memset(buffer, 0, bytes);
     return ret;
 }
 
@@ -1307,14 +1312,18 @@ static int adev_set_mode(struct audio_hw_device *dev, audio_mode_t mode)
 
 static int adev_set_mic_mute(struct audio_hw_device *dev, bool state)
 {
-    ALOGV("adev_set_mic_mute: %d", state);
-    return -ENOSYS;
+    ALOGD("adev_set_mic_mute: %d", state);
+    struct stub_audio_device *adev = (struct stub_audio_device *)dev;
+    adev->mic_mute = state;
+    return 0;
 }
 
 static int adev_get_mic_mute(const struct audio_hw_device *dev, bool *state)
 {
-    ALOGV("adev_get_mic_mute");
-    return -ENOSYS;
+    struct stub_audio_device *adev = (struct stub_audio_device *)dev;
+    ALOGD("adev_get_mic_mute: %d", adev->mic_mute);
+    *state = adev->mic_mute;
+    return 0;
 }
 
 static size_t adev_get_input_buffer_size(const struct audio_hw_device *dev,
