@@ -1359,7 +1359,7 @@ static int adev_open_input_stream(struct audio_hw_device *dev,
                                   audio_source_t source __unused)
 {
     ALOGV("adev_open_input_stream...");
-
+    struct stub_audio_device *adev = (struct stub_audio_device *)dev;
     *stream_in = NULL;
     struct stub_stream_in *in = (struct stub_stream_in *)calloc(1, sizeof(struct stub_stream_in));
     if (!in)
@@ -1391,6 +1391,7 @@ static int adev_open_input_stream(struct audio_hw_device *dev,
         in->format = STUB_DEFAULT_AUDIO_FORMAT;
     in->frame_count = samples_per_milliseconds(
         ass.input_buffer_milliseconds, in->sample_rate, 1);
+    in->dev = adev;
 
     ALOGV("adev_open_input_stream: sample_rate: %u, channels: %x, format: %d,"
           "frames: %zu",
