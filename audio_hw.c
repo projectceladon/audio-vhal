@@ -387,6 +387,12 @@ static int out_standby(struct audio_stream *stream)
     ALOGV("out_standby Lock acquired");
     struct stub_stream_out *out = (struct stub_stream_out *)stream;
     int client_id = get_client_id_from_address(out->bus_address);
+    if(client_id >= MAX_CONCURRENT_USER_NUM)
+    {
+        ALOGE("%s: client_id %d exceeds the maximum concurrent user supported",
+              __FUNCTION__, client_id);
+        return -1;
+    } 
     int out_fd = ass.out_fd[client_id];
     pthread_mutex_unlock(&ass.mutexlock_out);
     int ret;
@@ -641,6 +647,12 @@ static ssize_t out_write(struct audio_stream_out *stream, const void *buffer,
     if (bytes > 0)
     {
         int client_id = get_client_id_from_address(out->bus_address);
+        if(client_id >= MAX_CONCURRENT_USER_NUM)
+        {
+            ALOGE("%s: client_id %d exceeds the maximum concurrent user supported",
+                  __FUNCTION__, client_id);
+            return result;
+        }
         result = out_write_to_client(stream, buffer, bytes, timeout, client_id);
         if (result < 0)
         {
@@ -809,6 +821,12 @@ static void *out_socket_sever_thread(void *args)
                     close(new_client_fd);
                     continue;
                 }
+            }
+            if(user_id >= MAX_CONCURRENT_USER_NUM)
+            {
+                ALOGE("%s: client_id %d exceeds the maximum concurrent user supported",
+                      __FUNCTION__, user_id);
+                return NULL;
             }
             ALOGW("%s A new audio OUT client connected to server. "
                   "new_client_fd = %d, user_id = %d",
@@ -1046,6 +1064,12 @@ static ssize_t in_read(struct audio_stream_in *stream, void *buffer,
 {
     struct stub_stream_in *in = (struct stub_stream_in *)stream;
     int client_id = get_client_id_from_address(in->bus_address);
+    if(client_id >= MAX_CONCURRENT_USER_NUM)
+    {
+        ALOGE("%s: client_id %d exceeds the maximum concurrent user supported",
+              __FUNCTION__, client_id);
+        return -1;
+    }
     ALOGV("in_read: %p, bytes %zu, client_id %d", buffer, bytes, client_id);
     client_id = get_client_id_from_user_id(client_id);
     int in_fd = ass.in_fd[client_id];
@@ -1261,6 +1285,12 @@ static void *in_socket_sever_thread(void *args)
                     continue;
                 }
             }
+            if(user_id >= MAX_CONCURRENT_USER_NUM)
+            {
+                ALOGE("%s: client_id %d exceeds the maximum concurrent user supported",
+                      __FUNCTION__, user_id);
+                return NULL;
+            }
             ALOGW("%s A new audio IN client connected to server. "
                   "new_client_fd = %d, user_id = %d",
                   __func__, new_client_fd, user_id);
@@ -1376,6 +1406,12 @@ static int adev_open_output_stream(struct audio_hw_device *dev,
     if (ass.oss_is_sent_open_cmd == 0)
     {
         int client_id = get_client_id_from_address(out->bus_address);
+        if(client_id >= MAX_CONCURRENT_USER_NUM)
+        {
+            ALOGE("%s: client_id %d exceeds the maximum concurrent user supported",
+                  __FUNCTION__, client_id);
+            return -1;
+        }
         int out_fd = ass.out_fd[client_id];
         if (send_open_cmd(&ass, AUDIO_OUT, out_fd) < 0)
         {
@@ -1402,6 +1438,12 @@ static void adev_close_output_stream(struct audio_hw_device *dev,
     pthread_mutex_lock(&ass.mutexlock_out);
     struct stub_stream_out *out = (struct stub_stream_out *)stream;
     int client_id = get_client_id_from_address(out->bus_address);
+    if(client_id >= MAX_CONCURRENT_USER_NUM)
+    {
+        ALOGE("%s: client_id %d exceeds the maximum concurrent user supported",
+              __FUNCTION__, client_id);
+        return;
+    }
     int out_fd = ass.out_fd[client_id];
     if (send_close_cmd(out_fd) < 0)
     {
@@ -1576,6 +1618,12 @@ static void adev_close_input_stream(struct audio_hw_device *dev,
     pthread_mutex_lock(&ass.mutexlock_in);
     struct stub_stream_in *in = (struct stub_stream_in *)stream;
     int client_id = get_client_id_from_address(in->bus_address);
+    if(client_id >= MAX_CONCURRENT_USER_NUM)
+    {
+        ALOGE("%s: client_id %d exceeds the maximum concurrent user supported",
+              __FUNCTION__, client_id);
+        return;
+    }
     client_id = get_client_id_from_user_id(client_id);
     int in_fd = ass.in_fd[client_id];
     if (ass.iss_read_flag[client_id] && in_fd > 0)
