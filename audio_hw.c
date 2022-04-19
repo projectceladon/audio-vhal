@@ -1064,6 +1064,7 @@ static ssize_t in_read(struct audio_stream_in *stream, void *buffer,
 {
     struct stub_stream_in *in = (struct stub_stream_in *)stream;
     int client_id = get_client_id_from_address(in->bus_address);
+    client_id = get_client_id_from_user_id(client_id);
     if(client_id >= MAX_CONCURRENT_USER_NUM)
     {
         ALOGE("%s: client_id %d exceeds the maximum concurrent user supported",
@@ -1071,7 +1072,6 @@ static ssize_t in_read(struct audio_stream_in *stream, void *buffer,
         return -1;
     }
     ALOGV("in_read: %p, bytes %zu, client_id %d", buffer, bytes, client_id);
-    client_id = get_client_id_from_user_id(client_id);
     int in_fd = ass.in_fd[client_id];
     if (!ass.iss_read_flag[client_id])
     {
@@ -1618,13 +1618,13 @@ static void adev_close_input_stream(struct audio_hw_device *dev,
     pthread_mutex_lock(&ass.mutexlock_in);
     struct stub_stream_in *in = (struct stub_stream_in *)stream;
     int client_id = get_client_id_from_address(in->bus_address);
+    client_id = get_client_id_from_user_id(client_id);
     if(client_id >= MAX_CONCURRENT_USER_NUM)
     {
         ALOGE("%s: client_id %d exceeds the maximum concurrent user supported",
               __FUNCTION__, client_id);
         return;
     }
-    client_id = get_client_id_from_user_id(client_id);
     int in_fd = ass.in_fd[client_id];
     if (ass.iss_read_flag[client_id] && in_fd > 0)
     {
