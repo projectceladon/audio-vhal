@@ -387,7 +387,7 @@ static int out_standby(struct audio_stream *stream)
     ALOGV("out_standby Lock acquired");
     struct stub_stream_out *out = (struct stub_stream_out *)stream;
     int client_id = get_client_id_from_address(out->bus_address);
-    if(client_id >= MAX_CONCURRENT_USER_NUM)
+    if (client_id >= MAX_CONCURRENT_USER_NUM)
     {
         ALOGE("%s: client_id %d exceeds the maximum concurrent user supported",
               __FUNCTION__, client_id);
@@ -647,7 +647,7 @@ static ssize_t out_write(struct audio_stream_out *stream, const void *buffer,
     if (bytes > 0)
     {
         int client_id = get_client_id_from_address(out->bus_address);
-        if(client_id >= MAX_CONCURRENT_USER_NUM)
+        if (client_id >= MAX_CONCURRENT_USER_NUM)
         {
             ALOGE("%s: client_id %d exceeds the maximum concurrent user supported",
                   __FUNCTION__, client_id);
@@ -722,7 +722,7 @@ static int out_get_next_write_timestamp(const struct audio_stream_out *stream,
     return -EINVAL;
 }
 
-static void *out_socket_sever_thread(void *args)
+static void *out_socket_server_thread(void *args)
 {
     struct audio_server_socket *pass = (struct audio_server_socket *)args;
     int ret = 0;
@@ -778,35 +778,6 @@ static void *out_socket_sever_thread(void *args)
         }
         else
         {
-
-            int out_fd = pass->out_fd[0];
-            if ((out_fd > 0) && !num_concurrent_users)
-            {
-                ALOGW("%s Currently only receive one out client. Close previous "
-                      "client(%d)",
-                      __func__, out_fd);
-                pthread_mutex_lock(&ass.mutexlock_out);
-                if (ATRACE_ENABLED())
-                {
-                    ATRACE_INT("avh_osst_before_send_close_cmd", pass->oss_is_sent_open_cmd);
-                }
-                pass->oss_is_sent_open_cmd = 0;
-                if (send_close_cmd(out_fd) < 0)
-                {
-                    ALOGE("Fail to notify audio out client(%d) to close.", out_fd);
-                }
-                if (ATRACE_ENABLED())
-                {
-                    ATRACE_INT("avh_osst_after_send_close_cmd", pass->oss_is_sent_open_cmd);
-                }
-                pthread_mutex_unlock(&ass.mutexlock_out);
-
-                if (epoll_ctl(pass->oss_epoll_fd[0], EPOLL_CTL_DEL, out_fd, NULL))
-                {
-                    ALOGE("Failed to delete audio out file descriptor to epoll");
-                }
-                close_socket_fd(&(pass->out_fd[0]));
-            }
             if (num_concurrent_users > 0) {
                 struct audio_socket_info asi;
                 if (read(new_client_fd, &asi, sizeof(struct audio_socket_info)) <= 0) {
@@ -821,18 +792,45 @@ static void *out_socket_sever_thread(void *args)
                     close(new_client_fd);
                     continue;
                 }
+                if (user_id >= MAX_CONCURRENT_USER_NUM)
+                {
+                    ALOGE("%s: client_id %d exceeds the maximum concurrent user supported",
+                          __FUNCTION__, user_id);
+                    return NULL;
+                }
             }
-            if(user_id >= MAX_CONCURRENT_USER_NUM)
+            int prev_out_fd = pass->out_fd[user_id];
+            if (prev_out_fd > 0)
             {
-                ALOGE("%s: client_id %d exceeds the maximum concurrent user supported",
-                      __FUNCTION__, user_id);
-                return NULL;
+                ALOGW("%s Currently only receive one out client. Close previous "
+                      "client(%d)", __func__, prev_out_fd);
+                pthread_mutex_lock(&ass.mutexlock_out);
+                if (ATRACE_ENABLED())
+                {
+                    ATRACE_INT("avh_osst_before_send_close_cmd", pass->oss_is_sent_open_cmd);
+                }
+                pass->oss_is_sent_open_cmd = 0;
+                if (send_close_cmd(prev_out_fd) < 0)
+                {
+                    ALOGE("Fail to notify audio out client(%d) to close.", prev_out_fd);
+                }
+                if (ATRACE_ENABLED())
+                {
+                    ATRACE_INT("avh_osst_after_send_close_cmd", pass->oss_is_sent_open_cmd);
+                }
+                pthread_mutex_unlock(&ass.mutexlock_out);
+
+                if (epoll_ctl(pass->oss_epoll_fd[user_id], EPOLL_CTL_DEL, prev_out_fd, NULL))
+                {
+                    ALOGE("Failed to delete audio out file descriptor to epoll");
+                }
+                close_socket_fd(&(pass->out_fd[user_id]));
             }
             ALOGW("%s A new audio OUT client connected to server. "
                   "new_client_fd = %d, user_id = %d",
                   __func__, new_client_fd, user_id);
             pass->out_fd[user_id] = new_client_fd;
-            out_fd = pass->out_fd[user_id];
+            int out_fd = pass->out_fd[user_id];
             pass->out_stream_standby = true;
             if (out_fd > 0)
             {
@@ -1065,7 +1063,7 @@ static ssize_t in_read(struct audio_stream_in *stream, void *buffer,
     struct stub_stream_in *in = (struct stub_stream_in *)stream;
     int client_id = get_client_id_from_address(in->bus_address);
     client_id = get_client_id_from_user_id(client_id);
-    if(client_id >= MAX_CONCURRENT_USER_NUM)
+    if (client_id >= MAX_CONCURRENT_USER_NUM)
     {
         ALOGE("%s: client_id %d exceeds the maximum concurrent user supported",
               __FUNCTION__, client_id);
@@ -1176,7 +1174,7 @@ static int in_remove_audio_effect(const struct audio_stream *stream, effect_hand
     return 0;
 }
 
-static void *in_socket_sever_thread(void *args)
+static void *in_socket_server_thread(void *args)
 {
     struct audio_server_socket *pass = (struct audio_server_socket *)args;
     int ret = 0;
@@ -1236,42 +1234,17 @@ static void *in_socket_sever_thread(void *args)
         }
         else
         {
-            if (!num_concurrent_users) {
-                pthread_mutex_lock(&pass->mutexlock_in);
-                int in_fd = pass->in_fd[0];
-                ALOGW("%s Currently only receive one input client. Close previous client(%d)",
-                    __func__, in_fd);
-                if (ass.iss_read_flag[0] && in_fd > 0 && in_fd != new_client_fd)
-                {
-                    ALOGV("%s:%d send_close_cmd pthread_mutex_lock in_fd %d", __func__, __LINE__, in_fd);
-                    if (send_close_cmd(in_fd) < 0)
-                    {
-                        ALOGE("Fail to notify audio in client(%d) to close.", in_fd);
-                    }
-                }
-                pthread_mutex_unlock(&pass->mutexlock_in);
-
-                if (in_fd > 0)
-                {
-                    if (epoll_ctl(pass->iss_epoll_fd[0], EPOLL_CTL_DEL, in_fd, NULL))
-                    {
-                        ALOGE("Failed to delete audio in file descriptor to epoll");
-                    }
-                    close_socket_fd(&(pass->in_fd[0]));
-                }
-            }
-
             if (num_concurrent_users > 0) {
                 struct audio_socket_info asi;
                 int result = read(new_client_fd, &asi, sizeof(struct audio_socket_info));
                 if (result <= 0) {
                     if (result < 0)
                     {
-                        ALOGE("in_socket_sever_thread: Fail to read from audio in client(%d) with error (%s)", new_client_fd, strerror(errno));
+                        ALOGE("in_socket_server_thread: Fail to read from audio in client(%d) with error (%s)", new_client_fd, strerror(errno));
                     }
                     else if (result == 0)
                     {
-                        ALOGE("in_socket_sever_thread: Audio in client(%d) is closed.", new_client_fd);
+                        ALOGE("in_socket_server_thread: Audio in client(%d) is closed.", new_client_fd);
                     }
                     ALOGW("%s Not able to read user id for IN, retry", __func__);
                     close(new_client_fd);
@@ -1284,12 +1257,32 @@ static void *in_socket_sever_thread(void *args)
                     close(new_client_fd);
                     continue;
                 }
+                if (user_id >= MAX_CONCURRENT_USER_NUM)
+                {
+                    ALOGE("%s: client_id %d exceeds the maximum concurrent user supported",
+                          __FUNCTION__, user_id);
+                    return NULL;
+                }
             }
-            if(user_id >= MAX_CONCURRENT_USER_NUM)
-            {
-                ALOGE("%s: client_id %d exceeds the maximum concurrent user supported",
-                      __FUNCTION__, user_id);
-                return NULL;
+            int prev_in_fd =  pass->in_fd[user_id];
+            if (prev_in_fd > 0) {
+                pthread_mutex_lock(&pass->mutexlock_in);
+                ALOGW("%s Currently only receive one input client. Close previous client(%d)",
+                    __func__, prev_in_fd);
+                if (ass.iss_read_flag[user_id] && prev_in_fd > 0 && prev_in_fd != new_client_fd)
+                {
+                    ALOGV("%s:%d send_close_cmd pthread_mutex_lock in_fd %d", __func__, __LINE__, prev_in_fd);
+                    if (send_close_cmd(prev_in_fd) < 0)
+                    {
+                        ALOGE("Fail to notify audio in client(%d) to close.", prev_in_fd);
+                    }
+                }
+                pthread_mutex_unlock(&pass->mutexlock_in);
+                if (epoll_ctl(pass->iss_epoll_fd[user_id], EPOLL_CTL_DEL, prev_in_fd, NULL))
+                {
+                    ALOGE("Failed to delete audio in file descriptor to epoll");
+                }
+                close_socket_fd(&(pass->in_fd[user_id]));
             }
             ALOGW("%s A new audio IN client connected to server. "
                   "new_client_fd = %d, user_id = %d",
@@ -1406,7 +1399,7 @@ static int adev_open_output_stream(struct audio_hw_device *dev,
     if (ass.oss_is_sent_open_cmd == 0)
     {
         int client_id = get_client_id_from_address(out->bus_address);
-        if(client_id >= MAX_CONCURRENT_USER_NUM)
+        if (client_id >= MAX_CONCURRENT_USER_NUM)
         {
             ALOGE("%s: client_id %d exceeds the maximum concurrent user supported",
                   __FUNCTION__, client_id);
@@ -1438,7 +1431,7 @@ static void adev_close_output_stream(struct audio_hw_device *dev,
     pthread_mutex_lock(&ass.mutexlock_out);
     struct stub_stream_out *out = (struct stub_stream_out *)stream;
     int client_id = get_client_id_from_address(out->bus_address);
-    if(client_id >= MAX_CONCURRENT_USER_NUM)
+    if (client_id >= MAX_CONCURRENT_USER_NUM)
     {
         ALOGE("%s: client_id %d exceeds the maximum concurrent user supported",
               __FUNCTION__, client_id);
@@ -1619,7 +1612,7 @@ static void adev_close_input_stream(struct audio_hw_device *dev,
     struct stub_stream_in *in = (struct stub_stream_in *)stream;
     int client_id = get_client_id_from_address(in->bus_address);
     client_id = get_client_id_from_user_id(client_id);
-    if(client_id >= MAX_CONCURRENT_USER_NUM)
+    if (client_id >= MAX_CONCURRENT_USER_NUM)
     {
         ALOGE("%s: client_id %d exceeds the maximum concurrent user supported",
               __FUNCTION__, client_id);
@@ -1781,7 +1774,7 @@ static int adev_open(const hw_module_t *module, const char *name,
     }
     ALOGI("Out tcp port of INET socket %d", ass.out_tcp_port);
 
-    pthread_create(&ass.oss_thread, NULL, out_socket_sever_thread, &ass);
+    pthread_create(&ass.oss_thread, NULL, out_socket_server_thread, &ass);
     for (int i = 0; i < MAX_CONCURRENT_USER_NUM; i++)
     {
         ass.oss_epoll_fd[i] = epoll_create1(0);
@@ -1804,7 +1797,7 @@ static int adev_open(const hw_module_t *module, const char *name,
     }
     ALOGI("In tcp port of INET socket %d", ass.in_tcp_port);
 
-    pthread_create(&ass.iss_thread, NULL, in_socket_sever_thread, &ass);
+    pthread_create(&ass.iss_thread, NULL, in_socket_server_thread, &ass);
     for (int i = 0; i < MAX_CONCURRENT_USER_NUM; i++)
     {
         ass.iss_epoll_fd[i] = epoll_create1(0);
