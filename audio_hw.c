@@ -1063,9 +1063,9 @@ static ssize_t in_read(struct audio_stream_in *stream, void *buffer,
     struct stub_stream_in *in = (struct stub_stream_in *)stream;
     int client_id = get_client_id_from_address(in->bus_address);
     client_id = get_client_id_from_user_id(client_id);
-    if (client_id >= MAX_CONCURRENT_USER_NUM)
+    if (client_id >= MAX_CONCURRENT_USER_NUM || client_id < 0)
     {
-        ALOGE("%s: client_id %d exceeds the maximum concurrent user supported",
+        ALOGE("%s: client_id %d is not a valid concurrent user_id",
               __FUNCTION__, client_id);
         return -1;
     }
@@ -1612,9 +1612,9 @@ static void adev_close_input_stream(struct audio_hw_device *dev,
     struct stub_stream_in *in = (struct stub_stream_in *)stream;
     int client_id = get_client_id_from_address(in->bus_address);
     client_id = get_client_id_from_user_id(client_id);
-    if (client_id >= MAX_CONCURRENT_USER_NUM)
+    if (client_id >= MAX_CONCURRENT_USER_NUM || client_id < 0)
     {
-        ALOGE("%s: client_id %d exceeds the maximum concurrent user supported",
+        ALOGE("%s: client_id %d is not a valid concurrent user_id",
               __FUNCTION__, client_id);
         return;
     }
