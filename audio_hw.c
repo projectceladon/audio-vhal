@@ -124,7 +124,7 @@ struct audio_server_socket
     //Audio out socket
     struct stub_stream_out *sso;
     int out_fd[MAX_CONCURRENT_USER_NUM];
-    bool out_stream_standby;
+    bool out_stream_standby[MAX_CONCURRENT_USER_NUM];
     pthread_t oss_thread; // out socket server thread
     int oss_exit;         // out socket server thread exit
     int oss_fd;           // out socket server fd
@@ -411,7 +411,7 @@ static int out_standby(struct audio_stream *stream)
                   __FUNCTION__, out_fd, ret, strerror(errno));
             return -1;
         }
-        ass.out_stream_standby = true;
+        ass.out_stream_standby[client_id] = true;
     }
     else
     {
@@ -473,7 +473,7 @@ static ssize_t out_write_to_client(struct audio_stream_out *stream, const void *
     int out_fd = ass.out_fd[client_id];
     if (out_fd > 0)
     {
-        if (ass.out_stream_standby == true)
+        if (ass.out_stream_standby[client_id] == true)
         {
             struct audio_socket_info asi;
             int ret;
@@ -487,7 +487,7 @@ static ssize_t out_write_to_client(struct audio_stream_out *stream, const void *
                 ALOGE("%s: could not notify the client(%d) to start streaming: ret=%d: %s.",
                       __FUNCTION__, out_fd, ret, strerror(errno));
             }
-            ass.out_stream_standby = false;
+            ass.out_stream_standby[client_id] = false;
         }
         int oss_epoll_fd = ass.oss_epoll_fd[client_id];
         nevents = epoll_wait(oss_epoll_fd, ass.oss_epoll_event, 1, timeout);
@@ -831,7 +831,7 @@ static void *out_socket_server_thread(void *args)
                   __func__, new_client_fd, user_id);
             pass->out_fd[user_id] = new_client_fd;
             int out_fd = pass->out_fd[user_id];
-            pass->out_stream_standby = true;
+            pass->out_stream_standby[user_id] = true;
             if (out_fd > 0)
             {
                 pthread_mutex_lock(&ass.mutexlock_out);
