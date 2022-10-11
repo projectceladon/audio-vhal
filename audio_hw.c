@@ -1120,8 +1120,6 @@ static ssize_t in_read(struct audio_stream_in *stream, void *buffer,
     {
         timeout = frame_time_ms;
     }
-    //This WA is added to address the glitch issue while recording.
-    timeout+=2;
     if (bytes > 0)
     {
         result = in_read_from_client(stream, buffer, bytes, timeout, -1, client_id);
