@@ -967,7 +967,7 @@ static int in_set_gain(struct audio_stream_in *stream, float gain)
 }
 
 static ssize_t in_read_from_client(struct audio_stream_in *stream, void *buffer,
-                                   size_t bytes, int timeout, uint32_t offset, int client_id)
+                                   size_t bytes, int timeout, int client_id)
 {
     ssize_t ret = -1;
     ssize_t result = 0;
@@ -987,7 +987,8 @@ static ssize_t in_read_from_client(struct audio_stream_in *stream, void *buffer,
         }
         else if (nevents == 0)
         {
-            ALOGW("in_read_from_client: Client cannot be read in given time.");
+            ALOGW("in_read_from_client: Client cannot be read in given time. "
+                   "Filling silence for %zu bytes", bytes);
             memset(buffer, 0, bytes);
             return bytes;
         }
@@ -1027,7 +1028,7 @@ static ssize_t in_read_from_client(struct audio_stream_in *stream, void *buffer,
                                   ass.in_tcp_port, in_fd, bytes, result);
                             if (bytes != (size_t)result)
                             {
-                                ALOGW("in_read_from_client: (!^!) result(%zd) data is read. But "
+                                ALOGV("in_read_from_client: (!^!) result(%zd) data is read. But "
                                       "bytes(%zu) is expected.",
                                       result, bytes);
                             }
@@ -1125,14 +1126,31 @@ static ssize_t in_read(struct audio_stream_in *stream, void *buffer,
     }
     if (bytes > 0)
     {
-        result = in_read_from_client(stream, buffer, bytes, timeout, -1, client_id);
+        result = in_read_from_client(stream, buffer, bytes, timeout, client_id);
         if (result < 0)
         {
             ALOGV("The result of in_read_from_client is %zd", result);
         }
-        else if (result > 0)
+        else if (result < bytes)
         {
-            ret = result;
+            size_t bytes_read = result;
+            while (bytes_read < bytes) {
+                clock_gettime(CLOCK_MONOTONIC, &t);
+                const int64_t re_read_time = (t.tv_sec * 1000000000LL + t.tv_nsec) / 1000;
+                int64_t re_timeout = timeout - (re_read_time - now) / 1000LL;
+                ALOGW("in_read: (!^!) incomplete read(%zu/%zu) time remaining(%lld/%lld)",
+                    bytes_read, bytes, re_timeout, timeout);
+                if (re_timeout <= 0) {
+                    memset(buffer + bytes_read, 0, bytes - bytes_read);
+                    break;
+                }
+                result = in_read_from_client(stream, buffer + bytes_read, bytes - bytes_read, re_timeout, client_id);
+                if (result > 0) {
+                    bytes_read += result;
+                }
+            }
+            ALOGI("in_read: (!^!) incomplete re-read ended(%zu)/(%zu)",
+                bytes_read, bytes);
         }
     }
     clock_gettime(CLOCK_MONOTONIC, &t);
