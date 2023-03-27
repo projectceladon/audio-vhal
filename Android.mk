@@ -35,5 +35,7 @@ LOCAL_CFLAGS := -Wno-unused-parameter
 LOCAL_HEADER_LIBRARIES := libhardware_headers
 
 include $(BUILD_SHARED_LIBRARY)
+#############################################
+include $(LOCAL_PATH)/Gtest/Android.mk
 
 endif # TARGET_USE_AUDIO_VHAL
