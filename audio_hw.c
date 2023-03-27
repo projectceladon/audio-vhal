@@ -874,14 +874,6 @@ static void *out_socket_server_thread(void *args)
         }
     }
     ALOGW("%s Quit. port %d", __func__, pass->out_tcp_port);
-    pthread_mutex_lock(&ass.mutexlock_out);
-    pass->oss_is_sent_open_cmd = 0;
-    for (int i = 0; i < MAX_CONCURRENT_USER_NUM; i++)
-    {
-        close_socket_fd(&(pass->out_fd[i]));
-    }
-    close_socket_fd(&(pass->oss_fd));
-    pthread_mutex_unlock(&ass.mutexlock_out);
     return NULL;
 }
 
@@ -1334,13 +1326,6 @@ static void *in_socket_server_thread(void *args)
     }
 
     ALOGW("%s Quit. (%d)", __func__, pass->in_fd[0]);
-    pthread_mutex_lock(&pass->mutexlock_in);
-    for (int i = 0; i < MAX_CONCURRENT_USER_NUM; i++)
-    {
-        close_socket_fd(&(pass->in_fd[i]));
-    }
-    close_socket_fd(&(pass->iss_fd));
-    pthread_mutex_unlock(&pass->mutexlock_in);
     return NULL;
 }
 
