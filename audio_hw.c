@@ -394,6 +394,7 @@ static int out_standby(struct audio_stream *stream)
     {
         ALOGE("%s: client_id %d exceeds the maximum concurrent user supported",
               __FUNCTION__, client_id);
+        pthread_mutex_unlock(&ass.mutexlock_out);
         return -1;
     } 
     int out_fd = ass.out_fd[client_id];
@@ -480,6 +481,7 @@ static ssize_t out_write_to_client(struct audio_stream_out *stream, const void *
         {
             struct audio_socket_info asi;
             int ret;
+            memset(&asi, 0, sizeof(struct audio_socket_info));
             asi.cmd = CMD_STREAM_START;
             do
             {
@@ -498,12 +500,12 @@ static ssize_t out_write_to_client(struct audio_stream_out *stream, const void *
         {
             if (errno != EINTR)
                 ALOGE("epoll_wait() unexpected error: %s", strerror(errno));
-            return errno;
+            ret = errno;
         }
         else if (nevents == 0)
         {
             ALOGW("out_write_to_client: Client cannot be written in given time.");
-            return -1;
+            ret = -1;
         }
         else if (nevents > 0)
         {
@@ -601,7 +603,6 @@ static ssize_t out_write_to_client(struct audio_stream_out *stream, const void *
                     ALOGV("out_write_to_client: epoll_wait unknown source fd.");
                 }
             }
-            return ret;
         }
     }
     else
@@ -610,7 +611,7 @@ static ssize_t out_write_to_client(struct audio_stream_out *stream, const void *
         ALOGV("out_write_to_client: (->v->) Audio out client is not connected. "
               "port(%d) out_fd(%d). Return bytes(%zu) directly.",
               ass.out_tcp_port, out_fd, bytes);
-        return -1;
+        ret = -1;
     }
     return ret;
 }
@@ -783,7 +784,8 @@ static void *out_socket_server_thread(void *args)
         {
             if (num_concurrent_users > 0) {
                 struct audio_socket_info asi;
-                if (read(new_client_fd, &asi, sizeof(struct audio_socket_info)) <= 0) {
+                int result = read(new_client_fd, &asi, sizeof(struct audio_socket_info));
+                if (result <= 0) {
                     ALOGW("%s Not able to read user id for OUT, retry", __func__);
                     close(new_client_fd);
                     continue;
@@ -799,6 +801,7 @@ static void *out_socket_server_thread(void *args)
                 {
                     ALOGE("%s: client_id %d exceeds the maximum concurrent user supported",
                           __FUNCTION__, user_id);
+                    close(new_client_fd);
                     return NULL;
                 }
             }
@@ -975,14 +978,14 @@ static ssize_t in_read_from_client(struct audio_stream_in *stream, void *buffer,
         {
             if (errno != EINTR)
                 ALOGE("epoll_wait() unexpected error: %s", strerror(errno));
-            return errno;
+            ret = errno;
         }
         else if (nevents == 0)
         {
             ALOGW("in_read_from_client: Client cannot be read in given time. "
                    "Filling silence for %zu bytes", bytes);
             memset(buffer, 0, bytes);
-            return bytes;
+            ret = bytes;
         }
         else if (nevents > 0)
         {
@@ -999,6 +1002,7 @@ static ssize_t in_read_from_client(struct audio_stream_in *stream, void *buffer,
                         }
                         close(in_fd);
                         ass.in_fd[client_id] = -1;
+                        break;
                     }
                     else if ((ass.iss_epoll_event[ne].events & EPOLLIN) != 0)
                     {
@@ -1039,7 +1043,6 @@ static ssize_t in_read_from_client(struct audio_stream_in *stream, void *buffer,
                     ALOGV("in_read_from_client: epoll_wait unknown");
                 }
             }
-            return ret;
         }
     }
     else
@@ -1048,7 +1051,7 @@ static ssize_t in_read_from_client(struct audio_stream_in *stream, void *buffer,
               " in_fd(%d). Memset data to 0. Return bytes(%zu) directly.",
               ass.in_tcp_port, in_fd, bytes);
         memset(buffer, 0, bytes);
-        return bytes;
+        ret = bytes;
     }
     return ret;
 }
@@ -1385,6 +1388,7 @@ static int adev_open_output_stream(struct audio_hw_device *dev,
     if (address) {
         out->bus_address = calloc(strlen(address) + 1, sizeof(char));
         strncpy(out->bus_address, address, strlen(address));
+        out->bus_address[strlen(address)] = '\0';
         ALOGD("%s: routing %s to client", __func__, out->bus_address);
     }
 
@@ -1407,6 +1411,7 @@ static int adev_open_output_stream(struct audio_hw_device *dev,
         {
             ALOGE("%s: client_id %d exceeds the maximum concurrent user supported",
                   __FUNCTION__, client_id);
+            pthread_mutex_unlock(&ass.mutexlock_out);
             return -1;
         }
         int out_fd = ass.out_fd[client_id];
@@ -1439,6 +1444,7 @@ static void adev_close_output_stream(struct audio_hw_device *dev,
     {
         ALOGE("%s: client_id %d exceeds the maximum concurrent user supported",
               __FUNCTION__, client_id);
+        pthread_mutex_unlock(&ass.mutexlock_out);
         return;
     }
     int out_fd = ass.out_fd[client_id];
@@ -1620,6 +1626,7 @@ static void adev_close_input_stream(struct audio_hw_device *dev,
     {
         ALOGE("%s: client_id %d is not a valid concurrent user_id",
               __FUNCTION__, client_id);
+        pthread_mutex_unlock(&ass.mutexlock_in);
         return;
     }
     int in_fd = ass.in_fd[client_id];
@@ -1787,8 +1794,10 @@ static int adev_open(const hw_module_t *module, const char *name,
         ALOGE("Failed to create output epoll file descriptor");
         }
     }
-    ass.oss_is_sent_open_cmd = 0;
     pthread_mutex_init(&ass.mutexlock_out, 0);
+    pthread_mutex_lock(&ass.mutexlock_out);
+    ass.oss_is_sent_open_cmd = 0;
+    pthread_mutex_unlock(&ass.mutexlock_out);
     ass.oss_write_count = 0;
 
     ass.ssi = NULL;
