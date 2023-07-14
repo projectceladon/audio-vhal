@@ -1275,6 +1275,7 @@ static void *in_socket_server_thread(void *args)
                 {
                     ALOGE("%s: client_id %d exceeds the maximum concurrent user supported",
                           __FUNCTION__, user_id);
+                    close(new_client_fd);
                     return NULL;
                 }
             }
